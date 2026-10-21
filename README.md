@@ -67,6 +67,20 @@ Help teams maintain consistent brand messaging and identify potentially risky pr
 
 GitHub: https://github.com/LakshmiRajaguru
 
+## 📸 Project Screenshots
+
+### Dashboard
+![BrandShield AI Dashboard](screenshots/Screenshot%202026-10-21%20195356.png)
+
+### Content Audit
+![BrandShield AI Content Audit](screenshots/Screenshot%202026-10-21%20195422.png)
+
+### Smart Rewrite
+![BrandShield AI Smart Rewrite](screenshots/Screenshot%202026-10-21%20195500.png)
+
+### Brand Guidelines
+![BrandShield AI Brand Guidelines](screenshots/Screenshot%202026-10-21%20195534.png)
+
 ---
 
 *BrandShield AI supports responsible brand governance. Human review is recommended before publication.*
