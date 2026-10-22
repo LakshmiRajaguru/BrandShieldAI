@@ -6,7 +6,11 @@ import BrandGuidelines, {
 import AuditReport from "./components/AuditReport.jsx";
 import "./index.css";
 
-const API_URL = "http://127.0.0.1:8000";
+// Use the Render backend in production and the local backend in development.
+const API_URL = (
+  import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000"
+).replace(/\/+$/, "");
+
 const HISTORY_KEY = "brandshield-audit-history-v1";
 
 const EXAMPLES = [
@@ -178,7 +182,6 @@ export default function App() {
     setPage("Content Audit");
   }
 
-  // FIX: Every example replaces the previous Smart Rewrite input.
   function tryExample(example) {
     setRewriteText(example.content);
     setRewriteResult("");
@@ -234,7 +237,7 @@ export default function App() {
       setHistory((previous) => [audit, ...previous].slice(0, 100));
     } catch (requestError) {
       setError(
-        `${requestError.message} Make sure the backend is running at ${API_URL}.`
+        `${requestError.message} Check that the backend is available at ${API_URL}.`
       );
     } finally {
       setLoading(false);
@@ -287,7 +290,7 @@ export default function App() {
       setRewriteResult(rewritten);
     } catch (requestError) {
       setRewriteError(
-        `${requestError.message} Make sure the backend is running at ${API_URL}.`
+        `${requestError.message} Check that the backend is available at ${API_URL}.`
       );
     } finally {
       setLoading(false);
