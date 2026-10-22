@@ -15,11 +15,13 @@ app = FastAPI(
     version="2.0.0",
 )
 
+# Allow requests from the local development frontend and deployed Vercel app.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:5173",
         "http://127.0.0.1:5173",
+        "https://brandshieldai-frontend.vercel.app",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -80,28 +82,32 @@ def analyze_text(content: str, guidelines: Guidelines) -> list[dict]:
 
     for phrase in clean_phrase_list(guidelines.prohibitedPhrases):
         if re.search(re.escape(phrase), content, re.IGNORECASE):
-            findings.append({
-                "type": "prohibited_phrase",
-                "severity": "high",
-                "matched_text": phrase,
-                "explanation": (
-                    f'The content contains the prohibited phrase "{phrase}".'
-                ),
-                "suggestion": SUGGESTIONS.get(
-                    phrase.casefold(),
-                    "Replace this wording with a clear, supportable statement.",
-                ),
-            })
+            findings.append(
+                {
+                    "type": "prohibited_phrase",
+                    "severity": "high",
+                    "matched_text": phrase,
+                    "explanation": (
+                        f'The content contains the prohibited phrase "{phrase}".'
+                    ),
+                    "suggestion": SUGGESTIONS.get(
+                        phrase.casefold(),
+                        "Replace this wording with a clear, supportable statement.",
+                    ),
+                }
+            )
 
     for term in clean_phrase_list(guidelines.requiredTerms):
         if not re.search(re.escape(term), content, re.IGNORECASE):
-            findings.append({
-                "type": "missing_required_term",
-                "severity": "medium",
-                "matched_text": term,
-                "explanation": f'The required brand term "{term}" is missing.',
-                "suggestion": f'Include "{term}" naturally where appropriate.',
-            })
+            findings.append(
+                {
+                    "type": "missing_required_term",
+                    "severity": "medium",
+                    "matched_text": term,
+                    "explanation": f'The required brand term "{term}" is missing.',
+                    "suggestion": f'Include "{term}" naturally where appropriate.',
+                }
+            )
 
     return findings
 
