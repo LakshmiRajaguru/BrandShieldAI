@@ -1,21 +1,22 @@
 
-from __future__ import annotations
-
 import re
-from typing import List
+from typing import Optional
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 
+# --------------------------------------------------
+# 1. APPLICATION SETUP
+# --------------------------------------------------
+
 app = FastAPI(
     title="BrandShield AI",
-    description="Brand governance API for auditing and improving marketing content.",
-    version="2.0.0",
+    description="A brand governance API for auditing and rewriting content.",
+    version="1.0.0",
 )
 
-# Allow requests from the local development frontend and deployed Vercel app.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -29,180 +30,269 @@ app.add_middleware(
 )
 
 
-DEFAULT_PROHIBITED = [
+# --------------------------------------------------
+# 2. DEFAULT BRAND GUIDELINES
+# --------------------------------------------------
+
+DEFAULT_PROHIBITED_PHRASES = [
     "best in the world",
     "guaranteed results",
-    "100% risk-free",
-    "limited time offer",
+    "100% guaranteed",
+    "instant success",
+    "number one",
 ]
 
-DEFAULT_REQUIRED = ["BrandShield", "customer first"]
+DEFAULT_REQUIRED_TERMS = [
+    "BrandShield",
+    "customer first",
+]
 
-SUGGESTIONS = {
-    "best in the world": "a trusted choice for your needs",
-    "guaranteed results": "designed to help you achieve your goals",
-    "100% risk-free": "designed with safety in mind",
-    "limited time offer": "our offer",
-}
 
+# --------------------------------------------------
+# 3. REQUEST MODELS
+# --------------------------------------------------
 
 class Guidelines(BaseModel):
-    prohibitedPhrases: List[str] = Field(
-        default_factory=lambda: DEFAULT_PROHIBITED.copy()
+    prohibitedPhrases: list[str] = Field(
+        default_factory=lambda: DEFAULT_PROHIBITED_PHRASES.copy()
     )
-    requiredTerms: List[str] = Field(
-        default_factory=lambda: DEFAULT_REQUIRED.copy()
+    requiredTerms: list[str] = Field(
+        default_factory=lambda: DEFAULT_REQUIRED_TERMS.copy()
     )
 
 
 class ContentRequest(BaseModel):
-    content: str = Field(min_length=1, max_length=10000)
+    content: str = ""
     guidelines: Guidelines = Field(default_factory=Guidelines)
 
 
-def clean_phrase_list(phrases: List[str]) -> List[str]:
-    """Remove blank and duplicate phrases while preserving order."""
-    result = []
+# --------------------------------------------------
+# 4. REPLACEMENT SUGGESTIONS
+# --------------------------------------------------
+
+SUGGESTIONS = {
+    "best in the world": "a trusted solution",
+    "guaranteed results": "results designed to support your goals",
+    "100% guaranteed": "designed to support your needs",
+    "instant success": "a practical path toward your goals",
+    "number one": "a solution focused on customer needs",
+}
+
+
+# --------------------------------------------------
+# 5. HELPER FUNCTIONS
+# --------------------------------------------------
+
+def clean_phrase_list(phrases: list[str]) -> list[str]:
+    """Remove empty phrases and duplicate entries."""
+    cleaned = []
     seen = set()
 
     for phrase in phrases:
         phrase = phrase.strip()
-        key = phrase.casefold()
 
-        if phrase and key not in seen:
-            result.append(phrase)
-            seen.add(key)
+        if not phrase:
+            continue
 
-    return result
+        normalized = phrase.casefold()
 
+        if normalized not in seen:
+            cleaned.append(phrase)
+            seen.add(normalized)
 
-def analyze_text(content: str, guidelines: Guidelines) -> list[dict]:
-    """Check content against configured brand guidelines."""
-    findings = []
-
-    for phrase in clean_phrase_list(guidelines.prohibitedPhrases):
-        if re.search(re.escape(phrase), content, re.IGNORECASE):
-            findings.append(
-                {
-                    "type": "prohibited_phrase",
-                    "severity": "high",
-                    "matched_text": phrase,
-                    "explanation": (
-                        f'The content contains the prohibited phrase "{phrase}".'
-                    ),
-                    "suggestion": SUGGESTIONS.get(
-                        phrase.casefold(),
-                        "Replace this wording with a clear, supportable statement.",
-                    ),
-                }
-            )
-
-    for term in clean_phrase_list(guidelines.requiredTerms):
-        if not re.search(re.escape(term), content, re.IGNORECASE):
-            findings.append(
-                {
-                    "type": "missing_required_term",
-                    "severity": "medium",
-                    "matched_text": term,
-                    "explanation": f'The required brand term "{term}" is missing.',
-                    "suggestion": f'Include "{term}" naturally where appropriate.',
-                }
-            )
-
-    return findings
+    return cleaned
 
 
 def replace_phrase(text: str, phrase: str, replacement: str) -> str:
-    """Replace a phrase without case-sensitive matching."""
+    """Replace a phrase without matching it inside larger words."""
+    pattern = r"(?<!\w)" + re.escape(phrase) + r"(?!\w)"
+
     return re.sub(
-        re.escape(phrase),
-        lambda match: replacement,
+        pattern,
+        lambda _: replacement,
         text,
         flags=re.IGNORECASE,
     )
 
 
 def rewrite_guaranteed_results(text: str) -> str:
-    """Handle common sentences with prohibited guarantee claims."""
-    patterns = [
-        (
-            r"\bBrandShield\s+delivers\s+guaranteed results"
-            r"\s+for every customer\.?",
-            "BrandShield is designed to help every customer achieve "
-            "their goals.",
-        ),
-        (
-            r"\bWe\s+guarantee\s+results\b",
-            "We work to help you achieve your goals",
-        ),
-        (
-            r"\bguaranteed results\s+for every customer\b",
-            "support designed to help every customer reach their goals",
-        ),
-    ]
+    """Handle common guarantee-related promotional claims."""
+    replacements = {
+        "guaranteed results": "results designed to support your goals",
+        "100% guaranteed": "designed to support your needs",
+    }
 
-    for pattern, replacement in patterns:
-        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+    for phrase, replacement in replacements.items():
+        text = replace_phrase(text, phrase, replacement)
 
     return text
 
 
 def rewrite_promotional_content(text: str) -> str:
-    """Make the common promotional example read naturally."""
-    return re.sub(
-        r"\bGet it today\s+with our\s+limited time offer\b",
-        "Get it today to explore our offer",
-        text,
-        flags=re.IGNORECASE,
+    """Replace common exaggerated promotional language."""
+    replacements = {
+        "best in the world": "a trusted solution",
+        "number one": "focused on customer needs",
+        "instant success": "a practical path toward your goals",
+    }
+
+    for phrase, replacement in replacements.items():
+        text = replace_phrase(text, phrase, replacement)
+
+    return text
+
+
+# --------------------------------------------------
+# 6. CONTENT AUDIT
+# --------------------------------------------------
+
+def analyze_text(
+    content: str,
+    guidelines: Guidelines,
+) -> list[dict]:
+    """Find prohibited phrases and missing required terms."""
+    findings = []
+
+    prohibited_phrases = clean_phrase_list(
+        guidelines.prohibitedPhrases
     )
 
+    required_terms = clean_phrase_list(
+        guidelines.requiredTerms
+    )
+
+    # Check prohibited phrases.
+    for phrase in prohibited_phrases:
+        pattern = r"(?<!\w)" + re.escape(phrase) + r"(?!\w)"
+
+        matches = list(
+            re.finditer(pattern, content, flags=re.IGNORECASE)
+        )
+
+        for match in matches:
+            findings.append({
+                "type": "prohibited_phrase",
+                "category": "Brand Guidelines",
+                "phrase": phrase,
+                "matched_text": match.group(0),
+                "message": (
+                    f'The phrase "{match.group(0)}" '
+                    "is prohibited by your brand guidelines."
+                ),
+                "severity": "high",
+                "suggestion": SUGGESTIONS.get(
+                    phrase.casefold(),
+                    "Replace this phrase with approved brand language.",
+                ),
+            })
+
+    # Check required terms.
+    for term in required_terms:
+        pattern = r"(?<!\w)" + re.escape(term) + r"(?!\w)"
+
+        if not re.search(pattern, content, flags=re.IGNORECASE):
+            findings.append({
+                "type": "missing_required_term",
+                "category": "Brand Guidelines",
+                "phrase": term,
+                "matched_text": "",
+                "message": (
+                    f'The required term "{term}" is missing '
+                    "from the content."
+                ),
+                "severity": "medium",
+                "suggestion": f'Include "{term}" naturally in the content.',
+            })
+
+    return findings
+
+
+# --------------------------------------------------
+# 7. SMART REWRITE
+# --------------------------------------------------
 
 def rewrite_text(
     content: str,
     guidelines: Guidelines,
 ) -> tuple[str, list[dict]]:
-    """Rewrite prohibited wording and check the result again."""
-    rewritten = content
+    """Rewrite prohibited wording and add missing required terms."""
+    rewritten = content.strip()
 
-    # Apply context-aware replacements before general phrase replacements.
+    if not rewritten:
+        return "", analyze_text("", guidelines)
+
+    # Apply context-aware replacements first.
     rewritten = rewrite_guaranteed_results(rewritten)
     rewritten = rewrite_promotional_content(rewritten)
 
-    for phrase in clean_phrase_list(guidelines.prohibitedPhrases):
+    # Replace every configured prohibited phrase.
+    for phrase in clean_phrase_list(
+        guidelines.prohibitedPhrases
+    ):
         replacement = SUGGESTIONS.get(
             phrase.casefold(),
             "a clear and supportable alternative",
         )
-        rewritten = replace_phrase(rewritten, phrase, replacement)
 
-    # Add required terms that are missing.
+        rewritten = replace_phrase(
+            rewritten,
+            phrase,
+            replacement,
+        )
+
+    # Add missing required terms more naturally.
     for term in clean_phrase_list(guidelines.requiredTerms):
-        if not re.search(re.escape(term), rewritten, re.IGNORECASE):
-            if term.casefold() == "brandshield":
-                rewritten = f"BrandShield: {rewritten.lstrip()}"
-            elif term.casefold() == "customer first":
+        pattern = r"(?<!\w)" + re.escape(term) + r"(?!\w)"
+
+        if re.search(pattern, rewritten, flags=re.IGNORECASE):
+            continue
+
+        normalized_term = term.casefold()
+        base = rewritten.rstrip().rstrip(".!?").strip()
+
+        if normalized_term == "brandshield":
+            if base:
+                rewritten = f"BrandShield: {base}"
+            else:
+                rewritten = "BrandShield"
+
+        elif normalized_term == "customer first":
+            if base:
                 rewritten = (
-                    f"{rewritten.rstrip().rstrip('.')} "
-                    "— with a customer first approach."
+                    f"{base}. We take a customer first approach."
                 )
             else:
-                rewritten = f"{rewritten.rstrip().rstrip('.')} {term}."
+                rewritten = "We take a customer first approach."
 
-    # Tidy spacing and punctuation.
+        else:
+            if base:
+                rewritten = f"{base}. We also highlight {term}."
+            else:
+                rewritten = f"We highlight {term}."
+
+    # Clean repeated spaces and spaces before punctuation.
     rewritten = re.sub(r"[ \t]{2,}", " ", rewritten)
     rewritten = re.sub(r"\s+([,.;!?])", r"\1", rewritten)
     rewritten = rewritten.strip()
 
-    remaining_findings = analyze_text(rewritten, guidelines)
+    # Recheck against the active guidelines.
+    remaining_findings = analyze_text(
+        rewritten,
+        guidelines,
+    )
 
     return rewritten, remaining_findings
 
 
+# --------------------------------------------------
+# 8. API ROUTES
+# --------------------------------------------------
+
 @app.get("/")
 def root():
     return {
-        "project": "BrandShield AI",
-        "message": "Brand governance API is running.",
+        "message": "BrandShield AI API is running",
+        "version": "1.0.0",
         "docs": "/docs",
     }
 
@@ -211,47 +301,108 @@ def root():
 def health():
     return {
         "status": "healthy",
-        "project": "BrandShield AI",
+        "service": "BrandShield AI",
     }
 
 
 @app.post("/analyze")
 def analyze(request: ContentRequest):
-    findings = analyze_text(request.content, request.guidelines)
+    """Audit content against the supplied brand guidelines."""
+    findings = analyze_text(
+        request.content,
+        request.guidelines,
+    )
+
+    high_count = sum(
+        1 for finding in findings
+        if finding["severity"] == "high"
+    )
+
+    medium_count = sum(
+        1 for finding in findings
+        if finding["severity"] == "medium"
+    )
 
     return {
-        "project": "BrandShield AI",
-        "character_count": len(request.content),
-        "findings_count": len(findings),
+        "content": request.content,
         "findings": findings,
-        "status": "clean" if not findings else "issues_found",
+        "findings_count": len(findings),
+        "high_count": high_count,
+        "medium_count": medium_count,
+        "status": (
+            "review_required"
+            if findings
+            else "no_rule_violations_detected"
+        ),
         "notice": (
-            "No configured violations detected."
-            if not findings
-            else "Review the findings before publishing."
+            "Rule-based demo checks only the supplied guidelines. "
+            "A clean result does not guarantee factual accuracy "
+            "or complete brand compliance."
         ),
     }
 
 
 @app.post("/rewrite")
 def rewrite(request: ContentRequest):
+    """Rewrite content and report any remaining guideline violations."""
     rewritten, remaining_findings = rewrite_text(
         request.content,
         request.guidelines,
     )
 
+    # Describe configured prohibited phrases found in the original
+    # that no longer appear in the rewritten content.
+    applied_changes = []
+
+    for phrase in clean_phrase_list(
+        request.guidelines.prohibitedPhrases
+    ):
+        original_pattern = (
+            r"(?<!\w)" + re.escape(phrase) + r"(?!\w)"
+        )
+
+        rewritten_pattern = (
+            r"(?<!\w)" + re.escape(phrase) + r"(?!\w)"
+        )
+
+        if (
+            re.search(
+                original_pattern,
+                request.content,
+                flags=re.IGNORECASE,
+            )
+            and not re.search(
+                rewritten_pattern,
+                rewritten,
+                flags=re.IGNORECASE,
+            )
+        ):
+            applied_changes.append({
+                "original": phrase,
+                "replacement": SUGGESTIONS.get(
+                    phrase.casefold(),
+                    "a clear and supportable alternative",
+                ),
+                "reason": "Replaced prohibited brand wording.",
+            })
+
+    original_findings = analyze_text(
+        request.content,
+        request.guidelines,
+    )
+
     return {
-        "project": "BrandShield AI",
         "original_content": request.content,
         "rewritten_content": rewritten,
-        "character_count": len(rewritten),
+        "applied_changes": applied_changes,
+        "manual_review": bool(remaining_findings),
         "findings_count": len(remaining_findings),
+        "remaining_findings": remaining_findings,
         "findings": remaining_findings,
-        "status": "clean" if not remaining_findings else "issues_found",
+        "original_findings_count": len(original_findings),
         "notice": (
-            "Rewrite generated. Review it before publishing."
-            if not remaining_findings
-            else "The rewrite still has findings. Review and edit it "
-            "before publishing."
+            "Smart Rewrite uses rule-based replacements. "
+            "Review the rewritten text for meaning, tone, "
+            "grammar, and factual accuracy before publishing."
         ),
     }
