@@ -1,4 +1,3 @@
-
 import { useEffect, useMemo, useState } from "react";
 import BrandGuidelines, {
   loadGuidelines,
@@ -128,6 +127,8 @@ export default function App() {
   const [auditText, setAuditText] = useState("");
   const [rewriteText, setRewriteText] = useState("");
   const [rewriteResult, setRewriteResult] = useState("");
+  const [rewriteValidation, setRewriteValidation] = useState(null);
+  const [copyMessage, setCopyMessage] = useState("");
 
   const [result, setResult] = useState(null);
   const [selectedAudit, setSelectedAudit] = useState(null);
@@ -185,6 +186,8 @@ export default function App() {
   function tryExample(example) {
     setRewriteText(example.content);
     setRewriteResult("");
+    setRewriteValidation(null);
+    setCopyMessage("");
     setRewriteError("");
 
     setAuditText(example.content);
@@ -255,6 +258,8 @@ export default function App() {
     setLoading(true);
     setRewriteError("");
     setRewriteResult("");
+    setRewriteValidation(null);
+    setCopyMessage("");
 
     try {
       const response = await fetch(`${API_URL}/rewrite`, {
@@ -288,12 +293,42 @@ export default function App() {
       }
 
       setRewriteResult(rewritten);
+
+      const remainingFindings = Array.isArray(data.remaining_findings)
+        ? data.remaining_findings
+        : Array.isArray(data.findings)
+          ? data.findings
+          : [];
+
+      setRewriteValidation({
+        findings: remainingFindings,
+        count: remainingFindings.length,
+        manualReview:
+          typeof data.manual_review === "boolean"
+            ? data.manual_review
+            : remainingFindings.length > 0,
+      });
+
+      setCopyMessage("");
     } catch (requestError) {
       setRewriteError(
         `${requestError.message} Check that the backend is available at ${API_URL}.`
       );
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function copyRewrittenText() {
+    if (!rewriteResult.trim()) return;
+
+    try {
+      await navigator.clipboard.writeText(rewriteResult);
+      setCopyMessage("Rewritten text copied successfully.");
+    } catch {
+      setCopyMessage(
+        "Copy was unavailable. Select the rewritten text and copy it manually."
+      );
     }
   }
 
@@ -379,7 +414,10 @@ export default function App() {
             <strong>{page}</strong>
           </div>
 
-          <button className="button button-primary" onClick={startNewAudit}>
+          <button
+            className="button button-primary"
+            onClick={startNewAudit}
+          >
             + New audit
           </button>
         </header>
@@ -488,6 +526,7 @@ export default function App() {
                     <p>
                       Start with a marketing example or create a new audit.
                     </p>
+
                     <button
                       className="button button-primary"
                       onClick={startNewAudit}
@@ -566,6 +605,7 @@ export default function App() {
                     <h2>Content to audit</h2>
                     <p>Paste the text you want BrandShield to review.</p>
                   </div>
+
                   <span className="small-muted">
                     {auditText.length} characters
                   </span>
@@ -583,6 +623,7 @@ export default function App() {
                   <span className="small-muted">
                     Your configured brand guidelines will be applied.
                   </span>
+
                   <button
                     className="button button-primary"
                     onClick={() => runAudit()}
@@ -623,14 +664,17 @@ export default function App() {
                       <span className="stat-label">Total findings</span>
                       <strong className="stat-value">{findings.length}</strong>
                     </article>
+
                     <article className="stat-card">
                       <span className="stat-label">High severity</span>
                       <strong className="stat-value">{highCount}</strong>
                     </article>
+
                     <article className="stat-card">
                       <span className="stat-label">Medium severity</span>
                       <strong className="stat-value">{mediumCount}</strong>
                     </article>
+
                     <article className="stat-card">
                       <span className="stat-label">Low severity</span>
                       <strong className="stat-value">{lowCount}</strong>
@@ -659,9 +703,11 @@ export default function App() {
 
                           <div>
                             <strong>{getFindingMessage(finding)}</strong>
+
                             {finding.suggestion && (
                               <p>Suggestion: {finding.suggestion}</p>
                             )}
+
                             {finding.recommendation && (
                               <p>
                                 Recommendation: {finding.recommendation}
@@ -729,6 +775,8 @@ export default function App() {
                     onChange={(event) => {
                       setRewriteText(event.target.value);
                       setRewriteResult("");
+                      setRewriteValidation(null);
+                      setCopyMessage("");
                       setRewriteError("");
                     }}
                     placeholder="Paste any marketing copy here..."
@@ -739,6 +787,7 @@ export default function App() {
                     <span className="small-muted">
                       {rewriteText.length} characters
                     </span>
+
                     <button
                       className="button button-primary"
                       onClick={runRewrite}
@@ -772,6 +821,82 @@ export default function App() {
                         rows={12}
                       />
 
+                      {rewriteValidation && (
+                        <section className="rewrite-validation">
+                          <div className="section-heading">
+                            <div>
+                              <h3>Guideline validation</h3>
+                              <p>
+                                The rewritten content was checked against your
+                                active brand guidelines.
+                              </p>
+                            </div>
+
+                            <span
+                              className={`status-badge ${
+                                rewriteValidation.count === 0
+                                  ? "status-clean"
+                                  : "status-warning"
+                              }`}
+                            >
+                              {rewriteValidation.count === 0
+                                ? "No rule violations"
+                                : "Review required"}
+                            </span>
+                          </div>
+
+                          <p>
+                            Remaining findings:{" "}
+                            <strong>{rewriteValidation.count}</strong>
+                          </p>
+
+                          {rewriteValidation.count === 0 ? (
+                            <div className="success-message">
+                              No configured guideline violations were
+                              detected. Review the meaning and factual accuracy
+                              before publishing.
+                            </div>
+                          ) : (
+                            <div className="findings-list">
+                              {rewriteValidation.findings.map(
+                                (finding, index) => (
+                                  <article
+                                    className="finding-item"
+                                    key={`${getFindingMessage(finding)}-${index}`}
+                                  >
+                                    <span
+                                      className={`severity-badge severity-${getSeverity(
+                                        finding
+                                      )}`}
+                                    >
+                                      {getSeverity(finding)}
+                                    </span>
+
+                                    <div>
+                                      <strong>
+                                        {getFindingMessage(finding)}
+                                      </strong>
+
+                                      {finding.suggestion && (
+                                        <p>
+                                          Suggestion: {finding.suggestion}
+                                        </p>
+                                      )}
+                                    </div>
+                                  </article>
+                                )
+                              )}
+                            </div>
+                          )}
+
+                          {rewriteValidation.manualReview && (
+                            <p className="small-muted">
+                              Manual review is recommended before publishing.
+                            </p>
+                          )}
+                        </section>
+                      )}
+
                       <div className="editor-footer">
                         <button
                           className="button button-secondary"
@@ -787,12 +912,25 @@ export default function App() {
                         </button>
 
                         <button
+                          className="button button-secondary"
+                          onClick={copyRewrittenText}
+                        >
+                          Copy rewritten text
+                        </button>
+
+                        <button
                           className="button button-primary"
                           onClick={useRewrittenText}
                         >
                           Use rewritten copy →
                         </button>
                       </div>
+
+                      {copyMessage && (
+                        <p className="small-muted" role="status">
+                          {copyMessage}
+                        </p>
+                      )}
                     </>
                   ) : (
                     <div className="rewrite-placeholder">
@@ -809,6 +947,7 @@ export default function App() {
 
               <section className="workspace-card">
                 <h2>Active guideline checks</h2>
+
                 <div className="guideline-summary">
                   <div>
                     <strong>
@@ -873,6 +1012,7 @@ export default function App() {
                           </strong>
                           <small>{formatDate(audit.timestamp)}</small>
                         </span>
+
                         <span className="text-button">View report →</span>
                       </button>
                     ))}
@@ -883,6 +1023,7 @@ export default function App() {
                   <div className="empty-icon">▤</div>
                   <h3>No audit reports yet</h3>
                   <p>Run an audit to generate your first report.</p>
+
                   <button
                     className="button button-primary"
                     onClick={startNewAudit}
