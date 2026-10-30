@@ -21,7 +21,11 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:5173",
+        "http://localhost:5174",
+        "http://localhost:5175",
         "http://127.0.0.1:5173",
+        "http://127.0.0.1:5174",
+        "http://127.0.0.1:5175",
         "https://brandshieldai-frontend.vercel.app",
     ],
     allow_credentials=True,
@@ -85,6 +89,7 @@ SUGGESTIONS = {
 
 def clean_phrase_list(phrases: list[str]) -> list[str]:
     """Remove empty phrases and duplicate entries."""
+
     cleaned = []
     seen = set()
 
@@ -105,6 +110,7 @@ def clean_phrase_list(phrases: list[str]) -> list[str]:
 
 def replace_phrase(text: str, phrase: str, replacement: str) -> str:
     """Replace a phrase without matching it inside larger words."""
+
     pattern = r"(?<!\w)" + re.escape(phrase) + r"(?!\w)"
 
     return re.sub(
@@ -117,6 +123,7 @@ def replace_phrase(text: str, phrase: str, replacement: str) -> str:
 
 def rewrite_guaranteed_results(text: str) -> str:
     """Handle common guarantee-related promotional claims."""
+
     replacements = {
         "guaranteed results": "results designed to support your goals",
         "100% guaranteed": "designed to support your needs",
@@ -130,6 +137,7 @@ def rewrite_guaranteed_results(text: str) -> str:
 
 def rewrite_promotional_content(text: str) -> str:
     """Replace common exaggerated promotional language."""
+
     replacements = {
         "best in the world": "a trusted solution",
         "number one": "focused on customer needs",
@@ -151,6 +159,7 @@ def analyze_text(
     guidelines: Guidelines,
 ) -> list[dict]:
     """Find prohibited phrases and missing required terms."""
+
     findings = []
 
     prohibited_phrases = clean_phrase_list(
@@ -163,6 +172,7 @@ def analyze_text(
 
     # Check prohibited phrases.
     for phrase in prohibited_phrases:
+
         pattern = r"(?<!\w)" + re.escape(phrase) + r"(?!\w)"
 
         matches = list(
@@ -188,6 +198,7 @@ def analyze_text(
 
     # Check required terms.
     for term in required_terms:
+
         pattern = r"(?<!\w)" + re.escape(term) + r"(?!\w)"
 
         if not re.search(pattern, content, flags=re.IGNORECASE):
@@ -216,6 +227,7 @@ def rewrite_text(
     guidelines: Guidelines,
 ) -> tuple[str, list[dict]]:
     """Rewrite prohibited wording and add missing required terms."""
+
     rewritten = content.strip()
 
     if not rewritten:
@@ -229,6 +241,7 @@ def rewrite_text(
     for phrase in clean_phrase_list(
         guidelines.prohibitedPhrases
     ):
+
         replacement = SUGGESTIONS.get(
             phrase.casefold(),
             "a clear and supportable alternative",
@@ -242,21 +255,25 @@ def rewrite_text(
 
     # Add missing required terms more naturally.
     for term in clean_phrase_list(guidelines.requiredTerms):
+
         pattern = r"(?<!\w)" + re.escape(term) + r"(?!\w)"
 
         if re.search(pattern, rewritten, flags=re.IGNORECASE):
             continue
 
         normalized_term = term.casefold()
+
         base = rewritten.rstrip().rstrip(".!?").strip()
 
         if normalized_term == "brandshield":
+
             if base:
                 rewritten = f"BrandShield: {base}"
             else:
                 rewritten = "BrandShield"
 
         elif normalized_term == "customer first":
+
             if base:
                 rewritten = (
                     f"{base}. We take a customer first approach."
@@ -265,6 +282,7 @@ def rewrite_text(
                 rewritten = "We take a customer first approach."
 
         else:
+
             if base:
                 rewritten = f"{base}. We also highlight {term}."
             else:
@@ -308,6 +326,7 @@ def health():
 @app.post("/analyze")
 def analyze(request: ContentRequest):
     """Audit content against the supplied brand guidelines."""
+
     findings = analyze_text(
         request.content,
         request.guidelines,
@@ -344,39 +363,36 @@ def analyze(request: ContentRequest):
 
 @app.post("/rewrite")
 def rewrite(request: ContentRequest):
-    """Rewrite content and report any remaining guideline violations."""
+    """Rewrite content and report remaining guideline violations."""
+
     rewritten, remaining_findings = rewrite_text(
         request.content,
         request.guidelines,
     )
 
-    # Describe configured prohibited phrases found in the original
-    # that no longer appear in the rewritten content.
+    # Identify prohibited phrases removed from the original.
     applied_changes = []
 
     for phrase in clean_phrase_list(
         request.guidelines.prohibitedPhrases
     ):
-        original_pattern = (
-            r"(?<!\w)" + re.escape(phrase) + r"(?!\w)"
+
+        pattern = r"(?<!\w)" + re.escape(phrase) + r"(?!\w)"
+
+        original_has_phrase = re.search(
+            pattern,
+            request.content,
+            flags=re.IGNORECASE,
         )
 
-        rewritten_pattern = (
-            r"(?<!\w)" + re.escape(phrase) + r"(?!\w)"
+        rewritten_has_phrase = re.search(
+            pattern,
+            rewritten,
+            flags=re.IGNORECASE,
         )
 
-        if (
-            re.search(
-                original_pattern,
-                request.content,
-                flags=re.IGNORECASE,
-            )
-            and not re.search(
-                rewritten_pattern,
-                rewritten,
-                flags=re.IGNORECASE,
-            )
-        ):
+        if original_has_phrase and not rewritten_has_phrase:
+
             applied_changes.append({
                 "original": phrase,
                 "replacement": SUGGESTIONS.get(

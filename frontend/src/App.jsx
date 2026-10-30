@@ -153,6 +153,7 @@ export default function App() {
     (finding) => getSeverity(finding) === "low"
   ).length;
 
+  // Existing overview statistics
   const cleanCount = history.filter(
     (item) => item.status === "clean"
   ).length;
@@ -166,6 +167,109 @@ export default function App() {
     ? Math.round((cleanCount / history.length) * 100)
     : 0;
 
+  // ==========================================
+  // GOVERNANCE ANALYTICS
+  // ==========================================
+
+  // 1. Severity distribution across all audits
+  const severityAnalytics = history.reduce(
+    (totals, audit) => {
+      (audit.findings || []).forEach((finding) => {
+        totals[getSeverity(finding)] += 1;
+      });
+
+      return totals;
+    },
+    { high: 0, medium: 0, low: 0 }
+  );
+
+  const analyticsTotalFindings =
+    severityAnalytics.high +
+    severityAnalytics.medium +
+    severityAnalytics.low;
+
+  // 2. Most frequently detected violations
+  const violationAnalytics = Object.values(
+    history.reduce((groups, audit) => {
+      (audit.findings || []).forEach((finding) => {
+        const label = String(
+          finding.phrase ||
+            finding.category ||
+            finding.type ||
+            getFindingMessage(finding)
+        ).trim();
+
+        const key = label.toLowerCase();
+
+        if (!groups[key]) {
+          groups[key] = { label, count: 0 };
+        }
+
+        groups[key].count += 1;
+      });
+
+      return groups;
+    }, {})
+  )
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 5);
+
+  // 3. Audit trends for the last seven days
+  const auditTrends = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date();
+    date.setHours(0, 0, 0, 0);
+    date.setDate(date.getDate() - (6 - index));
+
+    const matchingAudits = history.filter((audit) => {
+      const auditDate = new Date(audit.timestamp);
+
+      return (
+        !Number.isNaN(auditDate.getTime()) &&
+        auditDate.toDateString() === date.toDateString()
+      );
+    });
+
+    return {
+      date: date.toLocaleDateString("en-IN", {
+        day: "numeric",
+        month: "short",
+      }),
+      audits: matchingAudits.length,
+      findings: matchingAudits.reduce(
+        (total, audit) => total + (audit.findings?.length || 0),
+        0
+      ),
+    };
+  });
+
+  // 4. Reviewer analytics
+  const reviewerAnalytics = history.reduce(
+    (totals, audit) => {
+      (audit.findings || []).forEach((finding) => {
+        const status = finding.review?.status;
+
+        if (status === "confirmed") {
+          totals.confirmed += 1;
+        } else if (status === "false_positive") {
+          totals.falsePositives += 1;
+        }
+      });
+
+      return totals;
+    },
+    { confirmed: 0, falsePositives: 0 }
+  );
+
+  const reviewerTotal =
+    reviewerAnalytics.confirmed +
+    reviewerAnalytics.falsePositives;
+
+  const pendingReviews = Math.max(
+    0,
+    analyticsTotalFindings - reviewerTotal
+  );
+
+  // Save history whenever it changes
   useEffect(() => {
     saveHistory(history);
   }, [history]);
@@ -350,7 +454,7 @@ export default function App() {
     setPage("Audit Report");
   }
 
-  // NEW: Save reviewer decisions in the selected audit and audit history.
+  // Save reviewer decisions in the selected audit and audit history.
   function updateFindingReview(auditId, findingIndex, review) {
     const updateAudit = (audit) => {
       if (!audit || audit.id !== auditId) return audit;
@@ -444,6 +548,9 @@ export default function App() {
         </header>
 
         <div className="page-content">
+          {/* ==================================
+              OVERVIEW PAGE
+          ================================== */}
           {page === "Overview" && (
             <>
               <section className="page-heading">
@@ -457,6 +564,7 @@ export default function App() {
                 </div>
               </section>
 
+              {/* Existing statistics */}
               <section className="stats-grid">
                 <article className="stat-card">
                   <span className="stat-label">Total audits</span>
@@ -483,6 +591,210 @@ export default function App() {
                 </article>
               </section>
 
+              {/* ==================================
+                  GOVERNANCE ANALYTICS DASHBOARD
+              ================================== */}
+              <section className="section-block analytics-section">
+                <div className="section-heading">
+                  <div>
+                    <div className="eyebrow">PERFORMANCE INSIGHTS</div>
+                    <h2>Governance Analytics</h2>
+                    <p>
+                      Understand brand violations, audit activity and
+                      reviewer decisions.
+                    </p>
+                  </div>
+
+                  <span className="analytics-period">
+                    Based on saved audit history
+                  </span>
+                </div>
+
+                <div className="analytics-grid">
+                  {/* Severity distribution */}
+                  <article className="analytics-card">
+                    <h3>Severity distribution</h3>
+                    <p className="analytics-description">
+                      Breakdown of detected findings.
+                    </p>
+
+                    {[
+                      {
+                        label: "High",
+                        count: severityAnalytics.high,
+                        color: "#dc2626",
+                      },
+                      {
+                        label: "Medium",
+                        count: severityAnalytics.medium,
+                        color: "#d97706",
+                      },
+                      {
+                        label: "Low",
+                        count: severityAnalytics.low,
+                        color: "#059669",
+                      },
+                    ].map((item) => (
+                      <div className="analytics-bar-item" key={item.label}>
+                        <div className="analytics-bar-heading">
+                          <span>{item.label}</span>
+                          <strong>{item.count}</strong>
+                        </div>
+
+                        <div className="analytics-bar-track">
+                          <div
+                            className="analytics-bar-fill"
+                            style={{
+                              width: `${
+                                analyticsTotalFindings
+                                  ? (item.count / analyticsTotalFindings) * 100
+                                  : 0
+                              }%`,
+                              background: item.color,
+                            }}
+                          />
+                        </div>
+                      </div>
+                    ))}
+
+                    <p className="analytics-footnote">
+                      Total findings: {analyticsTotalFindings}
+                    </p>
+                  </article>
+
+                  {/* Most frequent violations */}
+                  <article className="analytics-card">
+                    <h3>Most frequent violations</h3>
+                    <p className="analytics-description">
+                      Guideline issues appearing most often in saved audits.
+                    </p>
+
+                    {violationAnalytics.length === 0 ? (
+                      <p className="analytics-empty">
+                        No violation data available yet. Run an audit to get
+                        started.
+                      </p>
+                    ) : (
+                      <div className="leaderboard-list">
+                        {violationAnalytics.map((item, index) => (
+                          <div
+                            className="leaderboard-item"
+                            key={item.label}
+                          >
+                            <span className="leaderboard-rank">
+                              {index + 1}
+                            </span>
+
+                            <span
+                              className="leaderboard-name"
+                              title={item.label}
+                            >
+                              {item.label}
+                            </span>
+
+                            <strong>{item.count}</strong>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </article>
+                </div>
+
+                {/* Seven-day audit trends */}
+                <article className="analytics-card analytics-trend-card">
+                  <h3>Audit activity – last 7 days</h3>
+                  <p className="analytics-description">
+                    Daily audit volume and findings detected.
+                  </p>
+
+                  <div className="trend-list">
+                    {auditTrends.map((day) => {
+                      const maxAudits = Math.max(
+                        1,
+                        ...auditTrends.map((item) => item.audits)
+                      );
+
+                      return (
+                        <div className="trend-row" key={day.date}>
+                          <span className="trend-date">{day.date}</span>
+
+                          <div className="trend-bar-track">
+                            <div
+                              className="trend-bar-fill"
+                              style={{
+                                width: `${
+                                  (day.audits / maxAudits) * 100
+                                }%`,
+                              }}
+                            />
+                          </div>
+
+                          <span className="trend-value">
+                            {day.audits} audits
+                          </span>
+
+                          <span className="trend-findings">
+                            {day.findings} findings
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </article>
+
+                {/* Reviewer analytics */}
+                <article className="analytics-card reviewer-analytics">
+                  <h3>Reviewer activity</h3>
+                  <p className="analytics-description">
+                    Decisions recorded through the audit report workflow.
+                  </p>
+
+                  <div className="reviewer-stats">
+                    <div className="reviewer-stat">
+                      <span>Confirmed issues</span>
+                      <strong>{reviewerAnalytics.confirmed}</strong>
+                    </div>
+
+                    <div className="reviewer-stat">
+                      <span>False positives</span>
+                      <strong>{reviewerAnalytics.falsePositives}</strong>
+                    </div>
+
+                    <div className="reviewer-stat">
+                      <span>Pending reviews</span>
+                      <strong>{pendingReviews}</strong>
+                    </div>
+
+                    <div className="reviewer-stat">
+                      <span>Total reviewed</span>
+                      <strong>{reviewerTotal}</strong>
+                    </div>
+                  </div>
+
+                  <div className="review-progress-track">
+                    <div
+                      className="review-progress-fill"
+                      style={{
+                        width: `${
+                          analyticsTotalFindings
+                            ? (reviewerTotal / analyticsTotalFindings) * 100
+                            : 0
+                        }%`,
+                      }}
+                    />
+                  </div>
+
+                  <p className="analytics-footnote">
+                    {analyticsTotalFindings
+                      ? `${Math.round(
+                          (reviewerTotal / analyticsTotalFindings) * 100
+                        )}% of findings reviewed`
+                      : "Run an audit to begin tracking reviewer activity."}
+                  </p>
+                </article>
+              </section>
+
+              {/* Quick start */}
               <section className="section-block">
                 <div className="section-heading">
                   <div>
@@ -523,6 +835,7 @@ export default function App() {
                 </div>
               </section>
 
+              {/* Recent audits */}
               <section className="section-block">
                 <div className="section-heading">
                   <div>
@@ -575,8 +888,10 @@ export default function App() {
                               {(audit.content || "").slice(0, 65)}
                               {(audit.content || "").length > 65 ? "…" : ""}
                             </td>
+
                             <td>{formatDate(audit.timestamp)}</td>
                             <td>{audit.findings?.length || 0}</td>
+
                             <td>
                               <span
                                 className={`status-badge ${
@@ -590,6 +905,7 @@ export default function App() {
                                   : "Needs review"}
                               </span>
                             </td>
+
                             <td>
                               <button
                                 className="text-button"
@@ -608,6 +924,9 @@ export default function App() {
             </>
           )}
 
+          {/* ==================================
+              CONTENT AUDIT PAGE
+          ================================== */}
           {page === "Content Audit" && (
             <>
               <section className="page-heading">
@@ -768,6 +1087,9 @@ export default function App() {
             </>
           )}
 
+          {/* ==================================
+              SMART REWRITE PAGE
+          ================================== */}
           {page === "Smart Rewrite" && (
             <>
               <section className="page-heading">
@@ -993,6 +1315,9 @@ export default function App() {
             </>
           )}
 
+          {/* ==================================
+              AUDIT REPORT PAGE
+          ================================== */}
           {page === "Audit Report" && (
             <>
               <section className="page-heading">
@@ -1059,6 +1384,9 @@ export default function App() {
             </>
           )}
 
+          {/* ==================================
+              BRAND GUIDELINES PAGE
+          ================================== */}
           {page === "Brand Guidelines" && (
             <>
               <section className="page-heading">
