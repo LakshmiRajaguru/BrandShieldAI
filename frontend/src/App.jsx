@@ -1,3 +1,4 @@
+
 import { useEffect, useMemo, useState } from "react";
 import BrandGuidelines, {
   loadGuidelines,
@@ -347,6 +348,26 @@ export default function App() {
     setResult(audit);
     setAuditText(audit.content || "");
     setPage("Audit Report");
+  }
+
+  // NEW: Save reviewer decisions in the selected audit and audit history.
+  function updateFindingReview(auditId, findingIndex, review) {
+    const updateAudit = (audit) => {
+      if (!audit || audit.id !== auditId) return audit;
+
+      return {
+        ...audit,
+        findings: audit.findings.map((finding, index) =>
+          index === findingIndex
+            ? { ...finding, review }
+            : finding
+        ),
+      };
+    };
+
+    setHistory((previous) => previous.map(updateAudit));
+    setResult((previous) => updateAudit(previous));
+    setSelectedAudit((previous) => updateAudit(previous));
   }
 
   function downloadHistory() {
@@ -993,7 +1014,10 @@ export default function App() {
               </section>
 
               {selectedAudit || result ? (
-                <AuditReport report={selectedAudit || result} />
+                <AuditReport
+                  report={selectedAudit || result}
+                  onReviewFinding={updateFindingReview}
+                />
               ) : history.length > 0 ? (
                 <section className="workspace-card">
                   <h2>Select an audit</h2>

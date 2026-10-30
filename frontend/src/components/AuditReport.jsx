@@ -1,17 +1,9 @@
-
-import React from "react";
+import React, { useState } from "react";
 
 function getSeverity(finding) {
   const severity = String(finding?.severity || "").toLowerCase();
-
-  if (severity === "high" || severity === "critical") {
-    return "High";
-  }
-
-  if (severity === "low" || severity === "info" || severity === "informational") {
-    return "Low";
-  }
-
+  if (severity === "high" || severity === "critical") return "High";
+  if (["low", "info", "informational"].includes(severity)) return "Low";
   return "Medium";
 }
 
@@ -40,6 +32,7 @@ function downloadFile(filename, content, type) {
 
   link.href = url;
   link.download = filename;
+
   document.body.appendChild(link);
   link.click();
   link.remove();
@@ -47,10 +40,10 @@ function downloadFile(filename, content, type) {
   URL.revokeObjectURL(url);
 }
 
-export default function AuditReport({ report }) {
-  if (!report) {
-    return null;
-  }
+export default function AuditReport({ report, onReviewFinding }) {
+  const [comments, setComments] = useState({});
+
+  if (!report) return null;
 
   const findings = Array.isArray(report.findings)
     ? report.findings
@@ -84,6 +77,16 @@ export default function AuditReport({ report }) {
     (finding) => getSeverity(finding) === "Low"
   ).length;
 
+  const confirmedCount = findings.filter(
+    (finding) => finding.review?.status === "confirmed"
+  ).length;
+
+  const falsePositiveCount = findings.filter(
+    (finding) => finding.review?.status === "false_positive"
+  ).length;
+
+  const reviewedCount = confirmedCount + falsePositiveCount;
+
   const isClean =
     findings.length === 0 &&
     report.status !== "issues_found";
@@ -93,11 +96,7 @@ export default function AuditReport({ report }) {
     : `${findings.length} finding(s) require review before publication. Resolve the identified issues and run another audit.`;
 
   const recommendations = findings.length
-    ? [
-        ...new Set(
-          findings.map((finding) => getRecommendation(finding))
-        ),
-      ]
+    ? [...new Set(findings.map(getRecommendation))]
     : [
         "No configured violations were detected.",
         "Review factual accuracy and ensure all claims are supported.",
@@ -107,27 +106,62 @@ export default function AuditReport({ report }) {
   const reportData = {
     project: "BrandShield AI",
     report_type: "Brand Governance Audit",
+    audit_id: report.id || null,
     audit_date: dateValue || null,
     status: isClean ? "clean" : "issues_found",
     summary,
+
     statistics: {
       total_findings: findings.length,
       high_severity: highCount,
       medium_severity: mediumCount,
       low_severity: lowCount,
+      reviewed_findings: reviewedCount,
+      confirmed_issues: confirmedCount,
+      false_positives: falsePositiveCount,
+      pending_review: findings.length - reviewedCount,
     },
+
     original_content: content,
+
     findings: findings.map((finding) => ({
       type: finding.type || "brand_guideline",
       severity: getSeverity(finding),
       matched_text: getFindingText(finding),
-      explanation: finding.explanation || "Review this finding.",
+      explanation:
+        finding.explanation ||
+        finding.message ||
+        "Review this finding.",
       recommendation: getRecommendation(finding),
+      guideline: finding.phrase || finding.category || "",
+      reviewer_decision:
+        finding.review?.status || "not_reviewed",
+      reviewer_comment: finding.review?.comment || "",
+      reviewed_at: finding.review?.reviewedAt || null,
     })),
+
     recommendations,
     notice: report.notice || "",
     guidelines: report.guidelines || {},
   };
+
+  function saveReview(index, status) {
+    if (
+      typeof onReviewFinding !== "function" ||
+      !report.id
+    ) {
+      return;
+    }
+
+    onReviewFinding(report.id, index, {
+      status,
+      comment:
+        comments[index] ??
+        findings[index]?.review?.comment ??
+        "",
+      reviewedAt: new Date().toISOString(),
+    });
+  }
 
   function downloadTextReport() {
     const lines = [
@@ -149,6 +183,13 @@ export default function AuditReport({ report }) {
       `Medium severity: ${mediumCount}`,
       `Low severity: ${lowCount}`,
       "",
+      "REVIEWER SUMMARY",
+      "-".repeat(25),
+      `Reviewed findings: ${reviewedCount}`,
+      `Confirmed issues: ${confirmedCount}`,
+      `False positives: ${falsePositiveCount}`,
+      `Pending review: ${findings.length - reviewedCount}`,
+      "",
       "AUDITED CONTENT",
       "-".repeat(25),
       content || "Content not available",
@@ -157,7 +198,7 @@ export default function AuditReport({ report }) {
       "-".repeat(35),
     ];
 
-    if (findings.length === 0) {
+    if (!findings.length) {
       lines.push("No configured violations detected.");
     } else {
       findings.forEach((finding, index) => {
@@ -165,8 +206,31 @@ export default function AuditReport({ report }) {
           "",
           `${index + 1}. ${getFindingText(finding)}`,
           `Severity: ${getSeverity(finding)}`,
-          `Explanation: ${finding.explanation || "Review this finding."}`,
-          `Recommendation: ${getRecommendation(finding)}`
+          `Explanation: ${
+            finding.explanation ||
+            finding.message ||
+            "Review this finding."
+          }`,
+          `Recommendation: ${getRecommendation(finding)}`,
+          `Guideline: ${
+            finding.phrase ||
+            finding.category ||
+            finding.type ||
+            "Brand guideline"
+          }`,
+          `Reviewer decision: ${
+            finding.review?.status || "Not reviewed"
+          }`,
+          `Reviewer comment: ${
+            finding.review?.comment || "None"
+          }`,
+          `Reviewed at: ${
+            finding.review?.reviewedAt
+              ? new Date(
+                  finding.review.reviewedAt
+                ).toLocaleString()
+              : "Not reviewed"
+          }`
         );
       });
     }
@@ -175,10 +239,12 @@ export default function AuditReport({ report }) {
       "",
       "RECOMMENDED NEXT STEPS",
       "-".repeat(25),
-      ...recommendations.map((item, index) => `${index + 1}. ${item}`),
+      ...recommendations.map(
+        (item, index) => `${index + 1}. ${item}`
+      ),
       "",
-      "Note: Automated checks support human review; they do not guarantee"
-        + " that content is factually accurate or legally compliant."
+      "Note: Automated checks support human review; they do not guarantee",
+      "that content is factually accurate or legally compliant."
     );
 
     downloadFile(
@@ -245,9 +311,11 @@ export default function AuditReport({ report }) {
             >
               BRAND GOVERNANCE REPORT
             </p>
+
             <h2 style={{ margin: "0 0 8px" }}>
               Audit report
             </h2>
+
             <p style={{ margin: 0, color: "#64748b" }}>
               Generated by BrandShield AI
             </p>
@@ -267,18 +335,14 @@ export default function AuditReport({ report }) {
           </span>
         </div>
 
-        <p
-          style={{
-            marginTop: "18px",
-            marginBottom: "6px",
-            fontWeight: 700,
-          }}
-        >
+        <p style={{ marginTop: "18px", marginBottom: "6px", fontWeight: 700 }}>
           Executive summary
         </p>
+
         <p style={{ margin: 0, lineHeight: 1.6 }}>
           {summary}
         </p>
+
         <p
           style={{
             color: "#64748b",
@@ -293,31 +357,18 @@ export default function AuditReport({ report }) {
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))",
+          gridTemplateColumns:
+            "repeat(auto-fit, minmax(130px, 1fr))",
           gap: "12px",
         }}
       >
         {[
-          {
-            label: "Total findings",
-            value: findings.length,
-            color: "#172033",
-          },
-          {
-            label: "High severity",
-            value: highCount,
-            color: "#b91c1c",
-          },
-          {
-            label: "Medium severity",
-            value: mediumCount,
-            color: "#b45309",
-          },
-          {
-            label: "Low severity",
-            value: lowCount,
-            color: "#047857",
-          },
+          { label: "Total findings", value: findings.length, color: "#172033" },
+          { label: "High severity", value: highCount, color: "#b91c1c" },
+          { label: "Medium severity", value: mediumCount, color: "#b45309" },
+          { label: "Low severity", value: lowCount, color: "#047857" },
+          { label: "Reviewed", value: reviewedCount, color: "#0369a1" },
+          { label: "False positives", value: falsePositiveCount, color: "#b45309" },
         ].map((item) => (
           <div key={item.label} style={cardStyle}>
             <p
@@ -329,6 +380,7 @@ export default function AuditReport({ report }) {
             >
               {item.label}
             </p>
+
             <strong
               style={{
                 fontSize: "28px",
@@ -343,6 +395,7 @@ export default function AuditReport({ report }) {
 
       <div style={cardStyle}>
         <h3 style={{ marginTop: 0 }}>Audited content</h3>
+
         <p
           style={{
             whiteSpace: "pre-wrap",
@@ -351,17 +404,20 @@ export default function AuditReport({ report }) {
             marginBottom: 0,
           }}
         >
-          {content || "Original content is not available for this audit."}
+          {content ||
+            "Original content is not available for this audit."}
         </p>
       </div>
 
       <div style={cardStyle}>
-        <h3 style={{ marginTop: 0 }}>Findings and recommendations</h3>
+        <h3 style={{ marginTop: 0 }}>
+          Findings and recommendations
+        </h3>
 
         {findings.length === 0 ? (
           <p>
-            No configured violations were detected. Continue with a
-            human review before publishing.
+            No configured violations were detected.
+            Continue with a human review before publishing.
           </p>
         ) : (
           <div style={{ display: "grid", gap: "12px" }}>
@@ -385,6 +441,7 @@ export default function AuditReport({ report }) {
                   <strong>
                     {index + 1}. {getFindingText(finding)}
                   </strong>
+
                   <span
                     style={{
                       fontSize: "12px",
@@ -396,13 +453,111 @@ export default function AuditReport({ report }) {
                 </div>
 
                 <p style={{ lineHeight: 1.5 }}>
-                  {finding.explanation || "Review this finding."}
+                  {finding.explanation ||
+                    finding.message ||
+                    "Review this finding."}
                 </p>
 
-                <p style={{ marginBottom: 0, lineHeight: 1.5 }}>
+                <p
+                  style={{
+                    marginBottom: 0,
+                    lineHeight: 1.5,
+                  }}
+                >
                   <strong>Recommendation:</strong>{" "}
                   {getRecommendation(finding)}
                 </p>
+
+                <div
+                  style={{
+                    marginTop: "14px",
+                    paddingTop: "12px",
+                    borderTop: "1px solid #e2e8f0",
+                  }}
+                >
+                  <p>
+                    <strong>Guideline:</strong>{" "}
+                    {finding.phrase ||
+                      finding.category ||
+                      finding.type ||
+                      "Brand guideline"}
+                  </p>
+
+                  <p>
+                    <strong>Reviewer decision:</strong>{" "}
+                    {finding.review?.status === "confirmed"
+                      ? "Confirmed issue"
+                      : finding.review?.status === "false_positive"
+                        ? "False positive"
+                        : "Not reviewed"}
+                  </p>
+
+                  <textarea
+                    value={
+                      comments[index] ??
+                      finding.review?.comment ??
+                      ""
+                    }
+                    onChange={(event) =>
+                      setComments((previous) => ({
+                        ...previous,
+                        [index]: event.target.value,
+                      }))
+                    }
+                    placeholder="Optional reviewer comment..."
+                    rows={2}
+                    style={{
+                      width: "100%",
+                      padding: "10px",
+                      border: "1px solid #cbd5e1",
+                      borderRadius: "8px",
+                      marginBottom: "10px",
+                      boxSizing: "border-box",
+                    }}
+                  />
+
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: "8px",
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <button
+                      type="button"
+                      style={buttonStyle}
+                      onClick={() =>
+                        saveReview(index, "confirmed")
+                      }
+                    >
+                      Confirm issue
+                    </button>
+
+                    <button
+                      type="button"
+                      style={buttonStyle}
+                      onClick={() =>
+                        saveReview(index, "false_positive")
+                      }
+                    >
+                      Mark false positive
+                    </button>
+                  </div>
+
+                  {finding.review?.reviewedAt && (
+                    <p
+                      style={{
+                        fontSize: "12px",
+                        color: "#64748b",
+                      }}
+                    >
+                      Reviewed:{" "}
+                      {new Date(
+                        finding.review.reviewedAt
+                      ).toLocaleString()}
+                    </p>
+                  )}
+                </div>
               </div>
             ))}
           </div>
@@ -410,8 +565,16 @@ export default function AuditReport({ report }) {
       </div>
 
       <div style={cardStyle}>
-        <h3 style={{ marginTop: 0 }}>Recommended next steps</h3>
-        <ol style={{ paddingLeft: "22px", lineHeight: 1.8 }}>
+        <h3 style={{ marginTop: 0 }}>
+          Recommended next steps
+        </h3>
+
+        <ol
+          style={{
+            paddingLeft: "22px",
+            lineHeight: 1.8,
+          }}
+        >
           {recommendations.map((item, index) => (
             <li key={`${item}-${index}`}>{item}</li>
           ))}
@@ -447,10 +610,17 @@ export default function AuditReport({ report }) {
         </button>
       </div>
 
-      <p style={{ fontSize: "12px", color: "#64748b", lineHeight: 1.6 }}>
-        BrandShield AI provides automated guidance, not a guarantee of
-        factual accuracy, legal compliance, or publication readiness.
-        A human reviewer should make the final decision.
+      <p
+        style={{
+          fontSize: "12px",
+          color: "#64748b",
+          lineHeight: 1.6,
+        }}
+      >
+        BrandShield AI provides automated guidance, not a
+        guarantee of factual accuracy, legal compliance, or
+        publication readiness. A human reviewer should make
+        the final decision.
       </p>
     </section>
   );
